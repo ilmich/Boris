@@ -600,6 +600,18 @@ static char *history_path(void)
 }
 
 /* -------------------------------------------------------------------------
+ * Tool render hook - called by tools_dispatch() after each tool execution
+ * ---------------------------------------------------------------------- */
+
+static void repl_render_tool_call(const char *tool_name, const char *args_json,
+				  struct tool_result *result)
+{
+	spinner_stop();
+	tool_display_render(tool_name, args_json, result, stdout);
+	spinner_start();
+}
+
+/* -------------------------------------------------------------------------
  * repl_run - the main interactive loop
  * ---------------------------------------------------------------------- */
 
@@ -611,6 +623,8 @@ void repl_run(struct conversation_history *conv,
 		.cfg = config,
 		.should_exit = 0,
 	};
+
+	tools_set_render_hook(repl_render_tool_call);
 
 	/* Auto-load previous session */
 	if (conv && conv->count <= 1) {

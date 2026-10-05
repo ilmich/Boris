@@ -98,6 +98,20 @@ static int is_binary_content(const char *data, size_t len)
 	return ((non_printable * 100) / check) > 30;
 }
 
+void tool_read_format_call_fn(const char *args_json, char *buf, size_t buf_size)
+{
+	struct read_args args;
+	if (parse_read_args(args_json, &args) != 0) {
+		snprintf(buf, buf_size, "<invalid args>");
+		return;
+	}
+	if (args.offset > 0)
+		snprintf(buf, buf_size, "%s +%ld [%ldB]",
+			 args.path, args.offset, args.length);
+	else
+		snprintf(buf, buf_size, "%s", args.path);
+}
+
 struct tool_result tool_read_fn(const char *arguments_json,
 				const struct agent_configuration *cfg,
 				struct memory_arena *scratch)

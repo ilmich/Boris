@@ -358,6 +358,25 @@ static struct tool_result action_list(const char *path, const cJSON *args)
 	return tool_result_ok("memory", out);
 }
 
+void tool_memory_format_call_fn(const char *args_json, char *buf, size_t buf_size)
+{
+	cJSON *args = json_parse(args_json);
+	if (!args) {
+		snprintf(buf, buf_size, "<invalid args>");
+		return;
+	}
+	const char *action = json_get_str(args, "action");
+	const char *key = json_get_str(args, "key");
+	if (!action) {
+		snprintf(buf, buf_size, "<no action>");
+	} else if (key && key[0]) {
+		snprintf(buf, buf_size, "%s %s", action, key);
+	} else {
+		snprintf(buf, buf_size, "%s", action);
+	}
+	cJSON_Delete(args);
+}
+
 struct tool_result tool_memory_fn(const char *arguments_json,
 				  const struct agent_configuration *cfg,
 				  struct memory_arena *scratch)

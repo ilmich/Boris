@@ -207,17 +207,31 @@ typedef struct tool_result (*tool_fn)(const char *argument_json,
 				      struct memory_arena *scratch);
 
 /*
+ * Tool call formatter signature.
+ *
+ * Writes a human-readable one-line summary of the tool invocation from
+ * args_json into buf (at most buf_size bytes, NUL-terminated).
+ */
+typedef void (*tool_format_call_fn)(const char *args_json, char *buf,
+			       size_t buf_size);
+
+/*
  * Registered tool descriptor.
  *
  * parameters_schema is heap-allocated by the registry (strdup'd at
  * registration time). fn is the implementation; flag is the TOOL_*
  * bitmask used for enable/disable gating.
+ *
+ * format_call is optional: when non-NULL it formats a human-readable
+ * one-line summary of the tool invocation from args_json into buf.
+ * Used by tool_display_render() for REPL display.
  */
 struct tool_definition {
 	char name[64];
 	char description[512];
 	char *parameters_schema;
 	tool_fn fn;
+	tool_format_call_fn format_call_fn;
 	int flag;
 };
 

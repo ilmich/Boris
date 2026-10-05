@@ -99,6 +99,25 @@ static int parse_write_args(const char *json, struct write_args *args,
 	return 0;
 }
 
+void tool_write_format_call_fn(const char *args_json, char *buf, size_t buf_size)
+{
+	struct memory_arena *scratch = arena_create(4096);
+	if (!scratch) {
+		snprintf(buf, buf_size, "<out of memory>");
+		return;
+	}
+	struct write_args args;
+	if (parse_write_args(args_json, &args, scratch) != 0) {
+		arena_destroy(scratch);
+		snprintf(buf, buf_size, "<invalid args>");
+		return;
+	}
+	size_t content_len = args.content ? strlen(args.content) : 0;
+	snprintf(buf, buf_size, "%s (%s, %zu bytes)",
+		 args.path, args.mode, content_len);
+	arena_destroy(scratch);
+}
+
 struct tool_result tool_write_fn(const char *arguments_json,
 				 const struct agent_configuration *cfg,
 				 struct memory_arena *scratch)

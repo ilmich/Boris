@@ -15,8 +15,9 @@ Each tool is:
 3. A registration call in `tools_register_builtins()`
 4. A bitmask flag in `include/boris_types.h`
 5. A set of tests in `tests/test_tools.c`
+6. A `tool_format_call_fn` function for human-readable REPL display
 
-The model sees the name, description, and schema. When it calls the tool, `tools_dispatch()` validates the bitmask, calls your function with the raw argument JSON, and returns your `tool_result` back into the conversation.
+The model sees the name, description, and schema. When it calls the tool, `tools_dispatch()` validates the bitmask, calls your function with the raw argument JSON, and returns your `tool_result` back into the conversation. After each successful dispatch, the global render hook (if set) calls `tool_display_render()`, which uses your `tool_format_call_fn` to show a readable summary in the REPL.
 
 ---
 
@@ -157,14 +158,41 @@ Keep descriptions precise — they are part of every LLM request.
 
 ---
 
-## Step 4 — Register the tool
+## Step 4 — Write the format function
 
-Open `src/tools.c`. Add a forward declaration at the top alongside the others:
+Add a `tool_mytool_format_call_fn()` to `src/tools/mytool.c`. This function produces the human-readable one-line summary shown in the REPL when the tool is called. The tool name is rendered separately by `tool_display_render()` — only write the argument summary here.
+
+```c
+void tool_mytool_format_call_fn(const char *args_json, char *buf, size_t buf_size)
+{
+	cJSON *root = json_parse(args_json);
+	if (!root) {
+		snprintf(buf, buf_size, "<invalid args>");
+		return;
+	}
+	const char *input = json_get_str(root, "input");
+	snprintf(buf, buf_size, "%s", input ? input : "");
+	cJSON_Delete(root);
+}
+```
+
+**Rules:**
+- Name: `tool_<name>_format_call_fn`
+- Always NUL-terminate `buf` (snprintf guarantees this)
+- Keep the summary short — one line, no newlines
+- The tool name is implicit; do not repeat it in the output
+
+---
+
+## Step 5 — Register the tool
+
+Open `src/tools.c`. Add forward declarations at the top alongside the others:
 
 ```c
 struct tool_result tool_mytool_fn(const char *arguments_json,
 				  const struct agent_configuration *cfg,
 				  struct memory_arena *scratch);
+void tool_mytool_format_call_fn(const char *args_json, char *buf, size_t buf_size);
 ```
 
 Then add a `register_one()` call inside `tools_register_builtins()`:
@@ -172,11 +200,11 @@ Then add a `register_one()` call inside `tools_register_builtins()`:
 ```c
 void tools_register_builtins(void)
 {
-    register_one("read",   "...", SCHEMA_READ,   tool_read_fn,   TOOL_READ);
+    register_one("read",   "...", SCHEMA_READ,   tool_read_fn,   tool_read_format_call_fn,   TOOL_READ);
     /* ... existing tools ... */
     register_one("mytool",
         "One sentence describing what this tool does and when to use it.",
-        SCHEMA_MYTOOL, tool_mytool_fn, TOOL_MYTOOL);
+        SCHEMA_MYTOOL, tool_mytool_fn, tool_mytool_format_call_fn, TOOL_MYTOOL);
 }
 ```
 
@@ -184,13 +212,13 @@ The description is shown to the model. Be specific: describe the primary use cas
 
 ---
 
-## Step 5 — Add to the Makefile
+## Step 6 — Add to the Makefile
 
 The Makefile discovers tool sources via a wildcard, so no Makefile change is needed — `src/tools/mytool.c` will be compiled automatically on the next `make`.
 
 ---
 
-## Step 6 — Write tests
+## Step 7 — Write tests
 
 Open `tests/test_tools.c`. Add a forward declaration at the top:
 
@@ -252,7 +280,7 @@ Run with `make test` to verify.
 
 ---
 
-## Step 7 — Enable by default (optional)
+## Step 8 — Enable by default (optional)
 
 If your tool should be enabled by default, add it to the `tools.enabled` line in `config/boris.ini.example`:
 
@@ -265,7 +293,7 @@ If it requires configuration (API keys, endpoints, etc.), add the relevant keys 
 
 ---
 
-## Step 8 — Wire up `--tools` and env var
+## Step 9 — Wire up `--tools` and env var
 
 The `--tools` CLI flag and `BORIS_TOOLS` environment variable both go through `configuration_parse_tools_mask()` in `src/configuration.c`. Add your tool name there:
 
@@ -280,8 +308,10 @@ else if (strcmp(tok, "mytool") == 0)  mask |= TOOL_MYTOOL;
 - [ ] `TOOL_MYTOOL` flag added to `boris_types.h`, `TOOL_ALL` updated
 - [ ] Flag name added to `tools_mask_to_string()` in `tools.c`
 - [ ] `src/tools/mytool.c` created with correct function signature
+- [ ] `tool_mytool_format_call_fn()` written in `src/tools/mytool.c`
 - [ ] `SCHEMA_MYTOOL` written in `tools.c`
-- [ ] Forward declaration added to `tools.c`
+- [ ] Forward declaration of `tool_mytool_fn` added to `tools.c`
+- [ ] Forward declaration of `tool_mytool_format_call_fn` added to `tools.c`
 - [ ] `register_one()` call added to `tools_register_builtins()`
 - [ ] Forward declaration added to `tests/test_tools.c`
 - [ ] Tests written and passing under `make test`

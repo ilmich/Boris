@@ -10,6 +10,7 @@
 #define TOOLS_H
 
 #include <stddef.h>
+#include <stdio.h>
 #include "boris_types.h"
 
 struct cJSON;
@@ -106,6 +107,24 @@ struct tool_result tool_result_errorf(const char *tool_name,
  * NUL-terminated.
  */
 void tools_mask_to_string(unsigned int mask, char *buf, size_t size);
+
+/*
+ * Render a tool call as formatted markdown to out.
+ *
+ * Calls format_call() on the registered tool if available, otherwise falls
+ * back to "tool_name args_json". If result is non-NULL, also renders the
+ * result or error as a blockquote line. Uses markdown_render() for all output.
+ */
+void tool_display_render(const char *tool_name, const char *args_json,
+			 const struct tool_result *result, FILE *out);
+
+/*
+ * Set a global render hook called by tools_dispatch() after each successful
+ * tool execution. Pass NULL to clear. Not thread-safe; set once at startup.
+ */
+void tools_set_render_hook(void (*fn)(const char *tool_name,
+				      const char *args_json,
+				      struct tool_result *result));
 
 /*
  * Validate path against the sandbox and resolve it to an absolute path.

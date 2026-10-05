@@ -18,6 +18,7 @@
 #include "arena.h"
 #include "boris_errors.h"
 #include "logger.h"
+#include "markdown.h"
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +44,12 @@ struct tool_result tool_memory_fn(const char *arguments_json,
 struct tool_result tool_run_fn(const char *arguments_json,
 			       const struct agent_configuration *cfg,
 			       struct memory_arena *scratch);
+
+void tool_read_format_call_fn(const char *args_json, char *buf, size_t buf_size);
+void tool_write_format_call_fn(const char *args_json, char *buf, size_t buf_size);
+void tool_list_dir_format_call_fn(const char *args_json, char *buf, size_t buf_size);
+void tool_run_format_call_fn(const char *args_json, char *buf, size_t buf_size);
+void tool_memory_format_call_fn(const char *args_json, char *buf, size_t buf_size);
 
 /* -------------------------------------------------------------------------
  * Parameter schemas (JSON Schema objects)
@@ -200,6 +207,16 @@ int tools_sandbox_resolve(const struct agent_configuration *cfg,
 static struct tool_definition g_registry[TOOLS_REGISTRY_MAX];
 static size_t g_registry_count = 0;
 
+static void (*g_render_hook)(const char *tool_name, const char *args_json,
+			     struct tool_result *result) = NULL;
+
+void tools_set_render_hook(void (*fn)(const char *tool_name,
+				      const char *args_json,
+				      struct tool_result *result))
+{
+	g_render_hook = fn;
+}
+
 /* -------------------------------------------------------------------------
  * Convenience constructors
  * ---------------------------------------------------------------------- */
@@ -279,6 +296,7 @@ static void register_one(const char *name,
 			 const char *description,
 			 const char *schema_json,
 			 tool_fn fn,
+			 tool_format_call_fn format_call_fn,
 			 int flag)
 {
 	if (g_registry_count >= TOOLS_REGISTRY_MAX) {
@@ -300,6 +318,7 @@ static void register_one(const char *name,
 	snprintf(t->description, sizeof(t->description), "%s", description);
 	t->parameters_schema = schema_json ? strdup(schema_json) : NULL;
 	t->fn = fn;
+	t->format_call_fn = format_call_fn;
 	t->flag = flag;
 
 	log_debug("tools: registered '%s' (flag=0x%02x)", name, flag);
@@ -310,7 +329,7 @@ void tools_register_builtins(void)
 	register_one("read",
 		     "Read the contents of a file within the sandbox. "
 		     "Use offset and length to page through large files.",
-		     SCHEMA_READ, tool_read_fn, TOOL_READ);
+		     SCHEMA_READ, tool_read_fn, tool_read_format_call_fn, TOOL_READ);
 
 	register_one("write",
 		     "Write or append content to a file within the sandbox. "
@@ -319,24 +338,25 @@ void tools_register_builtins(void)
 		     "multiple smaller chunks: first call with mode=overwrite to "
 		     "create the file, then mode=append for each subsequent chunk. "
 		     "This avoids JSON encoding errors from embedding large strings.",
-		     SCHEMA_WRITE, tool_write_fn, TOOL_WRITE);
+		     SCHEMA_WRITE, tool_write_fn, tool_write_format_call_fn, TOOL_WRITE);
 
 	register_one("list_dir",
 		     "List the contents of a directory within the sandbox, "
 		     "formatted showing names, types and sizes.",
-		     SCHEMA_LIST_DIR, tool_list_dir_fn, TOOL_LIST_DIR);
+		     SCHEMA_LIST_DIR, tool_list_dir_fn, tool_list_dir_format_call_fn,
+		     TOOL_LIST_DIR);
 
 	register_one("memory",
 		     "Persistent key-value store. Use to remember facts across turns. "
 		     "Actions: get, set, delete, list.",
-		     SCHEMA_MEMORY, tool_memory_fn, TOOL_MEMORY);
+		     SCHEMA_MEMORY, tool_memory_fn, tool_memory_format_call_fn, TOOL_MEMORY);
 
 	register_one("run",
 		     "Execute a script file within the sandbox and return its output. "
 		     "The interpreter is detected from the shebang line or file extension "
 		     "(.py, .js, .sh, .rb, .lua, .pl, .php). "
 		     "Returns the exit code and combined stdout/stderr.",
-		     SCHEMA_RUN, tool_run_fn, TOOL_RUN);
+		     SCHEMA_RUN, tool_run_fn, tool_run_format_call_fn, TOOL_RUN);
 }
 
 int tools_register(struct tool_definition t)
@@ -412,6 +432,9 @@ struct tool_result tools_dispatch(const struct tool_call *call,
 				  call->name,
 				  result.is_error ? "ERROR" : "OK",
 				  result.content ? strlen(result.content) : 0);
+			if (g_render_hook)
+				g_render_hook(call->name, call->argument_json,
+					      &result);
 		}
 
 		snprintf(result.tool_call_id, sizeof(result.tool_call_id),
@@ -440,4 +463,60 @@ struct tool_result tools_dispatch(const struct tool_call *call,
 	snprintf(result.tool_name, sizeof(result.tool_name),
 		 "%.*s", (int)sizeof(result.tool_name) - 1, call->name);
 	return result;
+}
+
+#define TOOL_DISPLAY_PREVIEW_LEN 100
+
+void tool_display_render(const char *tool_name, const char *args_json,
+			 const struct tool_result *result, FILE *out)
+{
+	if (!tool_name || !out)
+		return;
+
+	char summary[256];
+	tool_format_call_fn fmt = NULL;
+
+	for (size_t i = 0; i < g_registry_count; i++) {
+		if (strcmp(g_registry[i].name, tool_name) == 0) {
+			fmt = g_registry[i].format_call_fn;
+			break;
+		}
+	}
+
+	if (fmt) {
+		fmt(args_json ? args_json : "{}", summary, sizeof(summary));
+	} else {
+		snprintf(summary, sizeof(summary), "%s %s",
+			 tool_name, args_json ? args_json : "{}");
+	}
+
+	char header[320];
+	snprintf(header, sizeof(header), "`%s` %s", tool_name, summary);
+	markdown_render(header, out);
+
+	if (!result)
+		return;
+
+	const char *content = result->content ? result->content : "";
+	size_t clen = strlen(content);
+	int truncated = clen > TOOL_DISPLAY_PREVIEW_LEN;
+
+	char preview[TOOL_DISPLAY_PREVIEW_LEN + 4];
+	snprintf(preview, sizeof(preview), "%.*s%s",
+		 TOOL_DISPLAY_PREVIEW_LEN, content, truncated ? "..." : "");
+	for (char *p = preview; *p; p++)
+		if (*p == '\n' || *p == '\r')
+			*p = ' ';
+
+	char line[512];
+	if (result->is_error)
+		snprintf(line, sizeof(line), "> **error:** %s", preview);
+	else if (preview[0])
+		snprintf(line, sizeof(line), "> %s", preview);
+	else
+		snprintf(line, sizeof(line), "> *(ok)*");
+
+	markdown_render(line, out);
+	fputc('\n', out);
+	fflush(out);
 }

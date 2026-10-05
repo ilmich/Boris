@@ -414,6 +414,23 @@ static char *exec_child(char *const argv[], const char *cwd,
  * Public tool function
  * ---------------------------------------------------------------------- */
 
+void tool_run_format_call_fn(const char *args_json, char *buf, size_t buf_size)
+{
+	struct run_args args;
+	if (parse_run_args(args_json, &args) != 0) {
+		snprintf(buf, buf_size, "<invalid args>");
+		return;
+	}
+	size_t pos = (size_t)snprintf(buf, buf_size, "%s", args.path);
+	for (int i = 0; i < args.user_argc && pos < buf_size - 1; i++) {
+		int n = snprintf(buf + pos, buf_size - pos,
+				 " %s", args.user_args[i]);
+		if (n > 0)
+			pos += (size_t)n;
+	}
+	free(args.stdin_data);
+}
+
 struct tool_result tool_run_fn(const char *arguments_json,
 			       const struct agent_configuration *cfg,
 			       struct memory_arena *scratch)

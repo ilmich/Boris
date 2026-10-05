@@ -131,6 +131,17 @@ static int list_one_dir(const char *dir_path, int show_hidden,
 	return 0;
 }
 
+void tool_list_dir_format_call_fn(const char *args_json, char *buf,
+				  size_t buf_size)
+{
+	struct list_dir_args args;
+	if (parse_list_dir_args(args_json, &args) != 0) {
+		snprintf(buf, buf_size, "list <invalid args>");
+		return;
+	}
+	snprintf(buf, buf_size, "%s", args.path);
+}
+
 struct tool_result tool_list_dir_fn(const char *arguments_json,
 				    const struct agent_configuration *cfg,
 				    struct memory_arena *scratch)
