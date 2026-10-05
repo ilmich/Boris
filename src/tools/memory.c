@@ -76,7 +76,7 @@ static cJSON *memory_load(const char *path)
 	char *buf = file_read_all(path, 10 * 1024 * 1024, &len);
 	if (!buf) {
 		if (errno == ENOENT)
-			return cJSON_CreateObject();
+			return json_create_object();
 		return NULL;
 	}
 
@@ -85,12 +85,12 @@ static cJSON *memory_load(const char *path)
 
 	if (!root) {
 		log_warning("memory: corrupted file, starting fresh");
-		return cJSON_CreateObject();
+		return json_create_object();
 	}
 
-	if (!cJSON_IsObject(root)) {
-		cJSON_Delete(root);
-		return cJSON_CreateObject();
+	if (!json_is_object(root)) {
+		json_delete(root);
+		return json_create_object();
 	}
 
 	return root;
@@ -101,7 +101,7 @@ static int memory_save(const char *path, cJSON *root)
 	if (ensure_dir(path) != 0)
 		return -1;
 
-	char *json = cJSON_PrintUnformatted(root);
+	char *json = json_to_str(root);
 	if (!json)
 		return -1;
 
@@ -157,29 +157,29 @@ static struct tool_result action_get(const char *path, const char *key)
 		return tool_result_errorf("memory", "Failed to load memory file");
 	}
 
-	cJSON *entry = cJSON_GetObjectItem(root, key);
-	if (!entry || !cJSON_IsObject(entry)) {
-		cJSON *result = cJSON_CreateObject();
-		cJSON_AddBoolToObject(result, "found", false);
-		cJSON_AddStringToObject(result, "key", key);
-		char *out = cJSON_PrintUnformatted(result);
-		cJSON_Delete(result);
-		cJSON_Delete(root);
+	cJSON *entry = json_get_obj(root, key);
+	if (!entry || !json_is_object(entry)) {
+		cJSON *result = json_create_object();
+		json_add_bool(result, "found", 0);
+		json_add_str(result, "key", key);
+		char *out = json_to_str(result);
+		json_delete(result);
+		json_delete(root);
 		if (!out)
 			return tool_result_errorf("memory", "Out of memory");
 		return tool_result_ok("memory", out);
 	}
 
-	cJSON *val = cJSON_GetObjectItem(entry, "value");
-	const char *value = val && cJSON_IsString(val) ? val->valuestring : "";
+	cJSON *val = json_get_obj(entry, "value");
+	const char *value = val && json_is_string(val) ? val->valuestring : "";
 
-	cJSON *result = cJSON_CreateObject();
-	cJSON_AddBoolToObject(result, "found", true);
-	cJSON_AddStringToObject(result, "key", key);
-	cJSON_AddStringToObject(result, "value", value);
-	char *out = cJSON_PrintUnformatted(result);
-	cJSON_Delete(result);
-	cJSON_Delete(root);
+	cJSON *result = json_create_object();
+	json_add_bool(result, "found", 1);
+	json_add_str(result, "key", key);
+	json_add_str(result, "value", value);
+	char *out = json_to_str(result);
+	json_delete(result);
+	json_delete(root);
 	if (!out)
 		return tool_result_errorf("memory", "Out of memory");
 	return tool_result_ok("memory", out);
@@ -207,19 +207,19 @@ static struct tool_result action_set(const char *path, const cJSON *args)
 		return tool_result_errorf("memory", "Failed to load memory file");
 	}
 
-	cJSON *entry = cJSON_GetObjectItem(root, key);
-	int is_new = !entry || !cJSON_IsObject(entry);
+	cJSON *entry = json_get_obj(root, key);
+	int is_new = !entry || !json_is_object(entry);
 
 	if (!entry) {
-		entry = cJSON_CreateObject();
-		cJSON_AddItemToObject(root, key, entry);
+		entry = json_create_object();
+		json_add_item(root, key, entry);
 	}
 
-	cJSON *old_val = cJSON_GetObjectItem(entry, "value");
+	cJSON *old_val = json_get_obj(entry, "value");
 	if (old_val) {
-		cJSON_SetValuestring(old_val, value);
+		json_set_str_value(old_val, value);
 	} else {
-		cJSON_AddStringToObject(entry, "value", value);
+		json_add_str(entry, "value", value);
 	}
 
 	time_t now = time(NULL);
@@ -227,30 +227,30 @@ static struct tool_result action_set(const char *path, const cJSON *args)
 	char ts[32];
 	strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", tm);
 
-	cJSON *updated = cJSON_GetObjectItem(entry, "updated");
+	cJSON *updated = json_get_obj(entry, "updated");
 	if (updated) {
-		cJSON_SetValuestring(updated, ts);
+		json_set_str_value(updated, ts);
 	} else {
-		cJSON_AddStringToObject(entry, "updated", ts);
+		json_add_str(entry, "updated", ts);
 	}
 
 	if (is_new)
-		cJSON_AddStringToObject(entry, "created", ts);
+		json_add_str(entry, "created", ts);
 
 	int rc = memory_save(path, root);
-	cJSON_Delete(root);
+	json_delete(root);
 
 	if (rc != 0) {
 		return tool_result_errorf("memory", "Failed to save memory file");
 	}
 
-	cJSON *result = cJSON_CreateObject();
-	cJSON_AddBoolToObject(result, "ok", true);
-	cJSON_AddStringToObject(result, "key", key);
-	cJSON_AddStringToObject(result, "action", "set");
-	cJSON_AddBoolToObject(result, "created", is_new);
-	char *out = cJSON_PrintUnformatted(result);
-	cJSON_Delete(result);
+	cJSON *result = json_create_object();
+	json_add_bool(result, "ok", 1);
+	json_add_str(result, "key", key);
+	json_add_str(result, "action", "set");
+	json_add_bool(result, "created", is_new);
+	char *out = json_to_str(result);
+	json_delete(result);
 	if (!out)
 		return tool_result_errorf("memory", "Out of memory");
 	return tool_result_ok("memory", out);
@@ -268,34 +268,34 @@ static struct tool_result action_delete(const char *path, const char *key)
 		return tool_result_errorf("memory", "Failed to load memory file");
 	}
 
-	cJSON *entry = cJSON_GetObjectItem(root, key);
+	cJSON *entry = json_get_obj(root, key);
 	if (!entry) {
-		cJSON *result = cJSON_CreateObject();
-		cJSON_AddBoolToObject(result, "ok", false);
-		cJSON_AddStringToObject(result, "key", key);
-		cJSON_AddStringToObject(result, "reason", "not found");
-		char *out = cJSON_PrintUnformatted(result);
-		cJSON_Delete(result);
-		cJSON_Delete(root);
+		cJSON *result = json_create_object();
+		json_add_bool(result, "ok", 0);
+		json_add_str(result, "key", key);
+		json_add_str(result, "reason", "not found");
+		char *out = json_to_str(result);
+		json_delete(result);
+		json_delete(root);
 		if (!out)
 			return tool_result_errorf("memory", "Out of memory");
 		return tool_result_ok("memory", out);
 	}
 
-	cJSON_DeleteItemFromObject(root, key);
+	json_delete_key(root, key);
 	int rc = memory_save(path, root);
-	cJSON_Delete(root);
+	json_delete(root);
 
 	if (rc != 0) {
 		return tool_result_errorf("memory", "Failed to save memory file");
 	}
 
-	cJSON *result = cJSON_CreateObject();
-	cJSON_AddBoolToObject(result, "ok", true);
-	cJSON_AddStringToObject(result, "key", key);
-	cJSON_AddStringToObject(result, "action", "delete");
-	char *out = cJSON_PrintUnformatted(result);
-	cJSON_Delete(result);
+	cJSON *result = json_create_object();
+	json_add_bool(result, "ok", 1);
+	json_add_str(result, "key", key);
+	json_add_str(result, "action", "delete");
+	char *out = json_to_str(result);
+	json_delete(result);
 	if (!out)
 		return tool_result_errorf("memory", "Out of memory");
 	return tool_result_ok("memory", out);
@@ -314,15 +314,15 @@ static struct tool_result action_list(const char *path, const cJSON *args)
 		return tool_result_errorf("memory", "Failed to load memory file");
 	}
 
-	cJSON *result = cJSON_CreateObject();
-	cJSON *entries = cJSON_CreateArray();
+	cJSON *result = json_create_object();
+	cJSON *entries = json_create_array();
 	int count = 0;
 
 	cJSON *item = NULL;
-	cJSON_ArrayForEach(item, root)
+	json_array_foreach(item, root)
 	{
 		const char *key = item->string;
-		if (!key || !cJSON_IsObject(item))
+		if (!key || !json_is_object(item))
 			continue;
 		if (prefix && prefix[0]) {
 			size_t plen = strlen(prefix);
@@ -333,25 +333,25 @@ static struct tool_result action_list(const char *path, const cJSON *args)
 		if (count >= limit)
 			break;
 
-		cJSON *entry = cJSON_CreateObject();
-		cJSON_AddStringToObject(entry, "key", key);
+		cJSON *entry = json_create_object();
+		json_add_str(entry, "key", key);
 
-		cJSON *val = cJSON_GetObjectItem(item, "value");
-		if (val && cJSON_IsString(val))
-			cJSON_AddStringToObject(entry, "value", val->valuestring);
+		cJSON *val = json_get_obj(item, "value");
+		if (val && json_is_string(val))
+			json_add_str(entry, "value", val->valuestring);
 		else
-			cJSON_AddStringToObject(entry, "value", "");
+			json_add_str(entry, "value", "");
 
-		cJSON_AddItemToArray(entries, entry);
+		json_array_add(entries, entry);
 		count++;
 	}
 
-	cJSON_AddNumberToObject(result, "count", count);
-	cJSON_AddItemToObject(result, "entries", entries);
+	json_add_int(result, "count", count);
+	json_add_item(result, "entries", entries);
 
-	char *out = cJSON_PrintUnformatted(result);
-	cJSON_Delete(result);
-	cJSON_Delete(root);
+	char *out = json_to_str(result);
+	json_delete(result);
+	json_delete(root);
 
 	if (!out)
 		return tool_result_errorf("memory", "Out of memory");
@@ -401,6 +401,6 @@ struct tool_result tool_memory_fn(const char *arguments_json,
 					    action);
 	}
 
-	cJSON_Delete(args);
+	json_delete(args);
 	return result;
 }
