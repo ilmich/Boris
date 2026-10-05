@@ -60,31 +60,30 @@ static int parse_write_args(const char *json, struct write_args *args,
 
 	const char *path = json_get_str(root, "path");
 	if (!path) {
-		cJSON_Delete(root);
+		json_delete(root);
 		return -1;
 	}
 
 	if (strlen(path) >= sizeof(args->path)) {
-		cJSON_Delete(root);
+		json_delete(root);
 		return -1;
 	}
 	snprintf(args->path, sizeof(args->path), "%s", path);
 
 	const char *content = json_get_str(root, "content");
 	if (!content) {
-		cJSON_Delete(root);
+		json_delete(root);
 		return -1;
 	}
 
 	if (strlen(content) > WRITE_MAX_CONTENT) {
-		cJSON_Delete(root);
+		json_delete(root);
 		return -1;
 	}
 
-	/* Arena-allocated — no individual free needed; scratch owns it */
 	args->content = arena_duplicate_string(scratch, content);
 	if (!args->content) {
-		cJSON_Delete(root);
+		json_delete(root);
 		return -1;
 	}
 
@@ -95,7 +94,7 @@ static int parse_write_args(const char *json, struct write_args *args,
 	if (json_get_bool(root, "create_dirs", 0))
 		args->create_dirs = 1;
 
-	cJSON_Delete(root);
+	json_delete(root);
 	return 0;
 }
 

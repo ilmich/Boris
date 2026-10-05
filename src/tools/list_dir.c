@@ -43,12 +43,12 @@ static int parse_list_dir_args(const char *json, struct list_dir_args *args)
 
 	const char *path = json_get_str(root, "path");
 	if (!path) {
-		cJSON_Delete(root);
+		json_delete(root);
 		return -1;
 	}
 
 	if (strlen(path) >= sizeof(args->path)) {
-		cJSON_Delete(root);
+		json_delete(root);
 		return -1;
 	}
 	snprintf(args->path, sizeof(args->path), "%s", path);
@@ -56,7 +56,7 @@ static int parse_list_dir_args(const char *json, struct list_dir_args *args)
 	if (json_get_bool(root, "show_hidden", 0))
 		args->show_hidden = 1;
 
-	cJSON_Delete(root);
+	json_delete(root);
 	return 0;
 }
 
