@@ -3,6 +3,7 @@
  *
  * Enforces project conventions: parse errors are logged with position
  * context; missing-key accessors return typed defaults rather than NULL.
+ * All direct cJSON calls in the project are funnelled through this file.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -39,7 +40,6 @@ cJSON *json_parse_with_len(const char *str, size_t len)
 		return NULL;
 	}
 
-	/* cJSON_ParseWithLengthOrNull handles the length safely */
 	const char *err_ptr = NULL;
 	cJSON *root = cJSON_ParseWithLengthOpts(str, len, &err_ptr, 0);
 	if (!root) {
@@ -109,6 +109,59 @@ int json_get_bool(const cJSON *obj, const char *key, int def)
 	return def;
 }
 
+cJSON *json_get_obj(const cJSON *obj, const char *key)
+{
+	if (!obj || !key)
+		return NULL;
+	return cJSON_GetObjectItemCaseSensitive(obj, key);
+}
+
+cJSON *json_get_array_item(const cJSON *arr, int idx)
+{
+	if (!arr)
+		return NULL;
+	return cJSON_GetArrayItem(arr, idx);
+}
+
+int json_get_array_size(const cJSON *arr)
+{
+	if (!arr)
+		return 0;
+	return cJSON_GetArraySize(arr);
+}
+
+int json_is_array(const cJSON *v)
+{
+	return cJSON_IsArray(v);
+}
+
+int json_is_object(const cJSON *v)
+{
+	return cJSON_IsObject(v);
+}
+
+int json_is_null(const cJSON *v)
+{
+	return cJSON_IsNull(v);
+}
+
+int json_is_string(const cJSON *v)
+{
+	return cJSON_IsString(v);
+}
+
+int json_is_number(const cJSON *v)
+{
+	return cJSON_IsNumber(v);
+}
+
+const char *json_str_value(const cJSON *v)
+{
+	if (!v)
+		return NULL;
+	return cJSON_GetStringValue(v);
+}
+
 char *json_to_str(const cJSON *obj)
 {
 	if (!obj)
@@ -121,6 +174,90 @@ char *json_to_str_pretty(const cJSON *obj)
 	if (!obj)
 		return NULL;
 	return cJSON_Print(obj);
+}
+
+cJSON *json_create_object(void)
+{
+	return cJSON_CreateObject();
+}
+
+cJSON *json_create_array(void)
+{
+	return cJSON_CreateArray();
+}
+
+cJSON *json_add_str(cJSON *obj, const char *key, const char *val)
+{
+	if (!obj || !key)
+		return NULL;
+	return cJSON_AddStringToObject(obj, key, val ? val : "");
+}
+
+cJSON *json_add_int(cJSON *obj, const char *key, int val)
+{
+	if (!obj || !key)
+		return NULL;
+	return cJSON_AddNumberToObject(obj, key, (double)val);
+}
+
+cJSON *json_add_double(cJSON *obj, const char *key, double val)
+{
+	if (!obj || !key)
+		return NULL;
+	return cJSON_AddNumberToObject(obj, key, val);
+}
+
+cJSON *json_add_bool(cJSON *obj, const char *key, int val)
+{
+	if (!obj || !key)
+		return NULL;
+	return cJSON_AddBoolToObject(obj, key, val);
+}
+
+cJSON *json_add_null(cJSON *obj, const char *key)
+{
+	if (!obj || !key)
+		return NULL;
+	return cJSON_AddNullToObject(obj, key);
+}
+
+cJSON *json_add_item(cJSON *obj, const char *key, cJSON *item)
+{
+	if (!obj || !key || !item)
+		return NULL;
+	if (!cJSON_AddItemToObject(obj, key, item))
+		return NULL;
+	return item;
+}
+
+cJSON *json_array_add(cJSON *arr, cJSON *item)
+{
+	if (!arr || !item)
+		return NULL;
+	if (!cJSON_AddItemToArray(arr, item))
+		return NULL;
+	return item;
+}
+
+cJSON *json_duplicate(const cJSON *item, int recurse)
+{
+	if (!item)
+		return NULL;
+	return cJSON_Duplicate(item, recurse);
+}
+
+void json_delete_key(cJSON *obj, const char *key)
+{
+	if (!obj || !key)
+		return;
+	cJSON_DeleteItemFromObject(obj, key);
+}
+
+char *json_set_str_value(cJSON *item, const char *val)
+{
+	if (!item || !val)
+		return NULL;
+	return cJSON_SetValuestring(item, val);
 }
 
 char *file_read_all(const char *path, size_t max_bytes, size_t *out_len)
