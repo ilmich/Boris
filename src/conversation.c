@@ -330,86 +330,79 @@ struct cJSON *conversation_to_json(const struct conversation_history *conv)
 	if (!conv)
 		return NULL;
 
-	arr = cJSON_CreateArray();
+	arr = json_create_array();
 	if (!arr)
 		return NULL;
 
 	for (i = 0; i < conv->count; i++) {
 		const struct conversation_message *msg = &conv->messages[i];
-		struct cJSON *msg_obj = cJSON_CreateObject();
+		struct cJSON *msg_obj = json_create_object();
 		if (!msg_obj) {
-			cJSON_Delete(arr);
+			json_delete(arr);
 			return NULL;
 		}
 
-		cJSON_AddStringToObject(msg_obj, "role",
-					role_to_string(msg->role));
+		json_add_str(msg_obj, "role", role_to_string(msg->role));
 
-		/* content - may be NULL for tool-call-only assistant msgs */
 		if (msg->content) {
-			cJSON_AddStringToObject(msg_obj, "content",
-						msg->content);
+			json_add_str(msg_obj, "content", msg->content);
 		} else {
-			cJSON_AddNullToObject(msg_obj, "content");
+			json_add_null(msg_obj, "content");
 		}
 
-		/* tool_calls (assistant messages only) */
 		if (msg->role == MESSAGE_ROLE_ASSISTANT &&
 		    msg->tool_calls && msg->tool_call_count > 0) {
-			struct cJSON *tc_arr = cJSON_CreateArray();
+			struct cJSON *tc_arr = json_create_array();
 			if (!tc_arr) {
-				cJSON_Delete(msg_obj);
-				cJSON_Delete(arr);
+				json_delete(msg_obj);
+				json_delete(arr);
 				return NULL;
 			}
 
 			for (size_t ti = 0; ti < msg->tool_call_count; ti++) {
 				const struct tool_call *tc =
 					&msg->tool_calls[ti];
-				struct cJSON *tc_obj = cJSON_CreateObject();
+				struct cJSON *tc_obj = json_create_object();
 				if (!tc_obj) {
-					cJSON_Delete(tc_arr);
-					cJSON_Delete(msg_obj);
-					cJSON_Delete(arr);
+					json_delete(tc_arr);
+					json_delete(msg_obj);
+					json_delete(arr);
 					return NULL;
 				}
 
-				cJSON_AddStringToObject(tc_obj, "id",
-							tc->id[0] ? tc->id : "");
-				cJSON_AddStringToObject(tc_obj, "type",
-							"function");
+				json_add_str(tc_obj, "id",
+					     tc->id[0] ? tc->id : "");
+				json_add_str(tc_obj, "type", "function");
 
-				struct cJSON *fn = cJSON_CreateObject();
+				struct cJSON *fn = json_create_object();
 				if (!fn) {
-					cJSON_Delete(tc_obj);
-					cJSON_Delete(tc_arr);
-					cJSON_Delete(msg_obj);
-					cJSON_Delete(arr);
+					json_delete(tc_obj);
+					json_delete(tc_arr);
+					json_delete(msg_obj);
+					json_delete(arr);
 					return NULL;
 				}
-				cJSON_AddStringToObject(fn, "name",
-							tc->name[0] ? tc->name : "");
+				json_add_str(fn, "name",
+					     tc->name[0] ? tc->name : "");
 				const char *args_val =
 					tc->argument_json ? tc->argument_json : "{}";
-				cJSON_AddStringToObject(fn, "arguments", args_val);
-				cJSON_AddItemToObject(tc_obj, "function", fn);
-				cJSON_AddItemToArray(tc_arr, tc_obj);
+				json_add_str(fn, "arguments", args_val);
+				json_add_item(tc_obj, "function", fn);
+				json_array_add(tc_arr, tc_obj);
 			}
 
-			cJSON_AddItemToObject(msg_obj, "tool_calls", tc_arr);
+			json_add_item(msg_obj, "tool_calls", tc_arr);
 		}
 
-		/* tool_call_id and name (ROLE_TOOL only) */
 		if (msg->role == MESSAGE_ROLE_TOOL) {
 			if (msg->tool_call_id)
-				cJSON_AddStringToObject(msg_obj,
-							"tool_call_id", msg->tool_call_id);
+				json_add_str(msg_obj, "tool_call_id",
+					     msg->tool_call_id);
 			if (msg->tool_name)
-				cJSON_AddStringToObject(msg_obj,
-							"name", msg->tool_name);
+				json_add_str(msg_obj, "name", msg->tool_name);
 		}
 
-		cJSON_AddItemToArray(arr, msg_obj);
+		json_array_add(arr, msg_obj);
 	}
 
 	return arr;
@@ -622,30 +615,27 @@ int conversation_count_role(const struct conversation_history *conv,
  */
 static struct cJSON *build_save_doc(const struct conversation_history *conv)
 {
-	struct cJSON *doc = cJSON_CreateObject();
+	struct cJSON *doc = json_create_object();
 	if (!doc)
 		return NULL;
 
-	/* Metadata */
-	cJSON_AddStringToObject(doc, "format", "boris_session_v1");
-	cJSON_AddNumberToObject(doc, "message_count", (double)conv->count);
+	json_add_str(doc, "format", "boris_session_v1");
+	json_add_double(doc, "message_count", (double)conv->count);
 
-	/* Timestamp */
 	time_t now = time(NULL);
 	struct tm *tm = gmtime(&now);
 	if (tm) {
 		char ts[64];
 		strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", tm);
-		cJSON_AddStringToObject(doc, "saved_at", ts);
+		json_add_str(doc, "saved_at", ts);
 	}
 
-	/* Messages array */
 	struct cJSON *msgs = conversation_to_json(conv);
 	if (!msgs) {
-		cJSON_Delete(doc);
+		json_delete(doc);
 		return NULL;
 	}
-	cJSON_AddItemToObject(doc, "messages", msgs);
+	json_add_item(doc, "messages", msgs);
 
 	return doc;
 }
@@ -657,20 +647,20 @@ static int parse_tool_call(const struct cJSON *tc_obj, struct tool_call *tc)
 {
 	memset(tc, 0, sizeof(*tc));
 
-	const cJSON *id_item = cJSON_GetObjectItemCaseSensitive(tc_obj, "id");
-	if (id_item && cJSON_IsString(id_item))
+	const cJSON *id_item = json_get_obj(tc_obj, "id");
+	if (id_item && json_is_string(id_item))
 		snprintf(tc->id, sizeof(tc->id), "%s", id_item->valuestring);
 
-	const cJSON *fn = cJSON_GetObjectItemCaseSensitive(tc_obj, "function");
+	const cJSON *fn = json_get_obj(tc_obj, "function");
 	if (!fn)
 		return -1;
 
-	const cJSON *name = cJSON_GetObjectItemCaseSensitive(fn, "name");
-	if (name && cJSON_IsString(name))
+	const cJSON *name = json_get_obj(fn, "name");
+	if (name && json_is_string(name))
 		snprintf(tc->name, sizeof(tc->name), "%s", name->valuestring);
 
-	const cJSON *args = cJSON_GetObjectItemCaseSensitive(fn, "arguments");
-	if (args && cJSON_IsString(args))
+	const cJSON *args = json_get_obj(fn, "arguments");
+	if (args && json_is_string(args))
 		tc->argument_json = strdup(args->valuestring);
 	else
 		tc->argument_json = strdup("{}");
@@ -703,16 +693,14 @@ static int parse_message(const struct cJSON *msg_obj,
 	else
 		return -1;
 
-	const cJSON *content = cJSON_GetObjectItemCaseSensitive(msg_obj, "content");
-	if (content && !cJSON_IsNull(content) && cJSON_IsString(content))
+	const cJSON *content = json_get_obj(msg_obj, "content");
+	if (content && !json_is_null(content) && json_is_string(content))
 		msg->content = strdup(content->valuestring);
 
-	/* tool_calls (assistant) */
 	if (msg->role == MESSAGE_ROLE_ASSISTANT) {
-		const cJSON *tc_arr = cJSON_GetObjectItemCaseSensitive(
-			msg_obj, "tool_calls");
-		if (tc_arr && cJSON_IsArray(tc_arr)) {
-			int n = cJSON_GetArraySize(tc_arr);
+		const cJSON *tc_arr = json_get_obj(msg_obj, "tool_calls");
+		if (tc_arr && json_is_array(tc_arr)) {
+			int n = json_get_array_size(tc_arr);
 			if (n > 0) {
 				msg->tool_calls = calloc((size_t)n,
 							 sizeof(struct tool_call));
@@ -721,7 +709,7 @@ static int parse_message(const struct cJSON *msg_obj,
 				msg->tool_call_count = 0;
 
 				struct cJSON *tc_obj = NULL;
-				cJSON_ArrayForEach(tc_obj, tc_arr)
+				json_array_foreach(tc_obj, tc_arr)
 				{
 					if (parse_tool_call(tc_obj,
 							    &msg->tool_calls[msg->tool_call_count]) == 0)
@@ -731,16 +719,13 @@ static int parse_message(const struct cJSON *msg_obj,
 		}
 	}
 
-	/* tool_call_id and name (tool results) */
 	if (msg->role == MESSAGE_ROLE_TOOL) {
-		const cJSON *tci = cJSON_GetObjectItemCaseSensitive(
-			msg_obj, "tool_call_id");
-		if (tci && cJSON_IsString(tci))
+		const cJSON *tci = json_get_obj(msg_obj, "tool_call_id");
+		if (tci && json_is_string(tci))
 			msg->tool_call_id = strdup(tci->valuestring);
 
-		const cJSON *tn = cJSON_GetObjectItemCaseSensitive(
-			msg_obj, "name");
-		if (tn && cJSON_IsString(tn))
+		const cJSON *tn = json_get_obj(msg_obj, "name");
+		if (tn && json_is_string(tn))
 			msg->tool_name = strdup(tn->valuestring);
 	}
 
@@ -788,8 +773,8 @@ enum boris_error conversation_save(const struct conversation_history *conv,
 	if (!doc)
 		return BORIS_ERROR_OUT_OF_MEMORY;
 
-	char *json = cJSON_PrintUnformatted(doc);
-	cJSON_Delete(doc);
+	char *json = json_to_str(doc);
+	json_delete(doc);
 	if (!json)
 		return BORIS_ERROR_OUT_OF_MEMORY;
 
@@ -842,44 +827,42 @@ struct conversation_history *conversation_load(const char *file_path)
 		return NULL;
 	}
 
-	/* Validate format */
 	const char *fmt = json_get_str(doc, "format");
 	if (!fmt || strcmp(fmt, "boris_session_v1") != 0) {
 		log_warning("Unknown session format: %s", fmt ? fmt : "(null)");
-		cJSON_Delete(doc);
+		json_delete(doc);
 		return NULL;
 	}
 
-	struct cJSON *msgs = cJSON_GetObjectItemCaseSensitive(doc, "messages");
-	if (!msgs || !cJSON_IsArray(msgs)) {
+	struct cJSON *msgs = json_get_obj(doc, "messages");
+	if (!msgs || !json_is_array(msgs)) {
 		log_warning("Session file missing messages array");
-		cJSON_Delete(doc);
+		json_delete(doc);
 		return NULL;
 	}
 
-	int msg_count = cJSON_GetArraySize(msgs);
+	int msg_count = json_get_array_size(msgs);
 	if (msg_count <= 0) {
-		cJSON_Delete(doc);
+		json_delete(doc);
 		return conversation_create();
 	}
 
 	struct conversation_history *conv = conversation_create();
 	if (!conv) {
-		cJSON_Delete(doc);
+		json_delete(doc);
 		return NULL;
 	}
 
-	/* Grow to fit all messages */
 	while (conv->capacity < (size_t)msg_count) {
 		if (conversation_grow(conv) != BORIS_OK) {
 			conversation_destroy(conv);
-			cJSON_Delete(doc);
+			json_delete(doc);
 			return NULL;
 		}
 	}
 
 	struct cJSON *msg_obj = NULL;
-	cJSON_ArrayForEach(msg_obj, msgs)
+	json_array_foreach(msg_obj, msgs)
 	{
 		struct conversation_message msg;
 		if (parse_message(msg_obj, &msg) != 0) {
@@ -887,14 +870,13 @@ struct conversation_history *conversation_load(const char *file_path)
 			continue;
 		}
 
-		/* Copy into the conversation */
 		struct conversation_message *slot = &conv->messages[conv->count];
 		*slot = msg;
 		conv->count++;
 		conv->total_characters += message_character_count(slot);
 	}
 
-	cJSON_Delete(doc);
+	json_delete(doc);
 
 	log_info("Loaded conversation from %s (%zu messages)",
 		 file_path, conv->count);
