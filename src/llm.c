@@ -16,7 +16,6 @@
 #include "conversation.h"
 #include "json.h"
 #include "logger.h"
-#include "cJSON.h"
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -148,38 +147,37 @@ static struct llm_response *error_response(const char *fmt, ...)
 
 static struct cJSON *tool_to_json(const struct tool_definition *t)
 {
-	struct cJSON *obj = cJSON_CreateObject();
+	struct cJSON *obj = json_create_object();
 	if (!obj)
 		return NULL;
 
-	cJSON_AddStringToObject(obj, "type", "function");
+	json_add_str(obj, "type", "function");
 
-	struct cJSON *fn = cJSON_CreateObject();
+	struct cJSON *fn = json_create_object();
 	if (!fn) {
-		cJSON_Delete(obj);
+		json_delete(obj);
 		return NULL;
 	}
 
-	cJSON_AddStringToObject(fn, "name", t->name);
-	cJSON_AddStringToObject(fn, "description", t->description);
+	json_add_str(fn, "name", t->name);
+	json_add_str(fn, "description", t->description);
 
 	if (t->parameters_schema && t->parameters_schema[0]) {
 		struct cJSON *params = json_parse(t->parameters_schema);
 		if (params) {
-			cJSON_AddItemToObject(fn, "parameters", params);
+			json_add_item(fn, "parameters", params);
 		} else {
-			/* Provide a minimal valid schema as fallback */
-			struct cJSON *fallback = cJSON_CreateObject();
-			cJSON_AddStringToObject(fallback, "type", "object");
-			cJSON_AddItemToObject(fn, "parameters", fallback);
+			struct cJSON *fallback = json_create_object();
+			json_add_str(fallback, "type", "object");
+			json_add_item(fn, "parameters", fallback);
 		}
 	} else {
-		struct cJSON *empty = cJSON_CreateObject();
-		cJSON_AddStringToObject(empty, "type", "object");
-		cJSON_AddItemToObject(fn, "parameters", empty);
+		struct cJSON *empty = json_create_object();
+		json_add_str(empty, "type", "object");
+		json_add_item(fn, "parameters", empty);
 	}
 
-	cJSON_AddItemToObject(obj, "function", fn);
+	json_add_item(obj, "function", fn);
 	return obj;
 }
 
@@ -192,28 +190,25 @@ static char *build_request_body(const struct conversation_history *conv,
 				size_t num_tools,
 				const struct agent_configuration *cfg)
 {
-	struct cJSON *root = cJSON_CreateObject();
+	struct cJSON *root = json_create_object();
 	if (!root)
 		return NULL;
 
-	/* model */
-	cJSON_AddStringToObject(root, "model",
-				cfg->model_name ? cfg->model_name : "default");
+	json_add_str(root, "model",
+		     cfg->model_name ? cfg->model_name : "default");
 
-	/* messages */
 	struct cJSON *messages = conversation_to_json(conv);
 	if (!messages) {
-		cJSON_Delete(root);
+		json_delete(root);
 		return NULL;
 	}
-	cJSON_AddItemToObject(root, "messages", messages);
+	json_add_item(root, "messages", messages);
 
-	/* tools - only include enabled tools */
 	int tool_count = 0;
 	if (num_tools > 0 && tools) {
-		struct cJSON *tools_arr = cJSON_CreateArray();
+		struct cJSON *tools_arr = json_create_array();
 		if (!tools_arr) {
-			cJSON_Delete(root);
+			json_delete(root);
 			return NULL;
 		}
 
@@ -222,29 +217,26 @@ static char *build_request_body(const struct conversation_history *conv,
 				continue;
 			struct cJSON *tj = tool_to_json(&tools[i]);
 			if (tj) {
-				cJSON_AddItemToArray(tools_arr, tj);
+				json_array_add(tools_arr, tj);
 				tool_count++;
 			}
 		}
 
 		if (tool_count > 0) {
-			cJSON_AddItemToObject(root, "tools", tools_arr);
-			cJSON_AddStringToObject(root, "tool_choice", "auto");
+			json_add_item(root, "tools", tools_arr);
+			json_add_str(root, "tool_choice", "auto");
 		} else {
-			cJSON_Delete(tools_arr);
+			json_delete(tools_arr);
 		}
 	}
 
-	/* sampling parameters */
-	cJSON_AddNumberToObject(root, "temperature", (double)cfg->temperature);
-	cJSON_AddNumberToObject(root, "max_tokens", cfg->max_tokens);
+	json_add_double(root, "temperature", (double)cfg->temperature);
+	json_add_int(root, "max_tokens", cfg->max_tokens);
 
-	/* stream */
-	cJSON_AddBoolToObject(root, "stream",
-			      cfg->stream_responses ? cJSON_True : cJSON_False);
+	json_add_bool(root, "stream", cfg->stream_responses);
 
-	char *body = cJSON_PrintUnformatted(root);
-	cJSON_Delete(root);
+	char *body = json_to_str(root);
+	json_delete(root);
 
 	log_debug("llm: request body %zu bytes, %d tools",
 		  body ? strlen(body) : 0, tool_count);
@@ -386,10 +378,10 @@ static struct tool_call_list stream_accum_to_list(
 static int parse_tool_calls_array(const struct cJSON *tc_arr,
 				  struct tool_call_list *list)
 {
-	if (!tc_arr || !cJSON_IsArray(tc_arr))
+	if (!tc_arr || !json_is_array(tc_arr))
 		return 0;
 
-	int n = cJSON_GetArraySize(tc_arr);
+	int n = json_get_array_size(tc_arr);
 	if (n <= 0)
 		return 0;
 
@@ -399,7 +391,7 @@ static int parse_tool_calls_array(const struct cJSON *tc_arr,
 
 	int parsed = 0;
 	struct cJSON *item = NULL;
-	cJSON_ArrayForEach(item, tc_arr)
+	json_array_foreach(item, tc_arr)
 	{
 		if (parsed >= TOOL_CALL_LIST_MAX)
 			break;
@@ -409,8 +401,7 @@ static int parse_tool_calls_array(const struct cJSON *tc_arr,
 		const char *id = json_get_str(item, "id");
 		snprintf(tc->id, sizeof(tc->id), "%s", id ? id : "");
 
-		struct cJSON *fn = cJSON_GetObjectItemCaseSensitive(
-			item, "function");
+		struct cJSON *fn = json_get_obj(item, "function");
 		if (fn) {
 			const char *fname = json_get_str(fn, "name");
 			snprintf(tc->name, sizeof(tc->name), "%s",
@@ -441,61 +432,54 @@ static void parse_non_streaming(struct llm_response *r, const char *body)
 		return;
 	}
 
-	/* Check for API-level error object */
-	struct cJSON *err_obj = cJSON_GetObjectItemCaseSensitive(root, "error");
-	if (err_obj && cJSON_IsObject(err_obj)) {
+	struct cJSON *err_obj = json_get_obj(root, "error");
+	if (err_obj && json_is_object(err_obj)) {
 		const char *emsg = json_get_str(err_obj, "message");
 		r->error = true;
 		snprintf(r->err.msg_storage, sizeof(r->err.msg_storage),
 			 "API error: %s", emsg ? emsg : "(no message)");
 		r->err.msg = r->err.msg_storage;
 		r->err.code = BORIS_ERROR_LLM;
-		cJSON_Delete(root);
+		json_delete(root);
 		return;
 	}
 
-	/* choices[0].message */
-	struct cJSON *choices = cJSON_GetObjectItemCaseSensitive(root, "choices");
-	if (!choices || !cJSON_IsArray(choices) ||
-	    cJSON_GetArraySize(choices) == 0) {
+	struct cJSON *choices = json_get_obj(root, "choices");
+	if (!choices || !json_is_array(choices) ||
+	    json_get_array_size(choices) == 0) {
 		r->error = true;
 		snprintf(r->err.msg_storage, sizeof(r->err.msg_storage),
 			 "response missing 'choices' array");
 		r->err.msg = r->err.msg_storage;
 		r->err.code = BORIS_ERROR_PARSE;
-		cJSON_Delete(root);
+		json_delete(root);
 		return;
 	}
 
-	struct cJSON *choice = cJSON_GetArrayItem(choices, 0);
+	struct cJSON *choice = json_get_array_item(choices, 0);
 	if (!choice) {
 		r->error = true;
 		snprintf(r->err.msg_storage, sizeof(r->err.msg_storage),
 			 "choices[0] is null");
 		r->err.msg = r->err.msg_storage;
 		r->err.code = BORIS_ERROR_PARSE;
-		cJSON_Delete(root);
+		json_delete(root);
 		return;
 	}
 
-	/* finish_reason */
 	const char *fr = json_get_str(choice, "finish_reason");
 	if (fr)
 		snprintf(r->finish_reason, sizeof(r->finish_reason), "%s", fr);
 
-	struct cJSON *message = cJSON_GetObjectItemCaseSensitive(choice,
-								 "message");
+	struct cJSON *message = json_get_obj(choice, "message");
 	if (message) {
-		/* content - strip thinking traces before storing */
-		struct cJSON *content_item = cJSON_GetObjectItemCaseSensitive(
-			message, "content");
-		if (content_item && !cJSON_IsNull(content_item)) {
-			const char *cstr = cJSON_GetStringValue(content_item);
+		struct cJSON *content_item = json_get_obj(message, "content");
+		if (content_item && !json_is_null(content_item)) {
+			const char *cstr = json_str_value(content_item);
 			if (cstr) {
-				/* Some llama.cpp builds expose thinking separately */
-				struct cJSON *rc = cJSON_GetObjectItemCaseSensitive(
-					message, "reasoning_content");
-				if (rc && cJSON_IsString(rc) && rc->valuestring[0]) {
+				struct cJSON *rc = json_get_obj(message,
+								"reasoning_content");
+				if (rc && json_is_string(rc) && rc->valuestring[0]) {
 					r->thinking = strdup(rc->valuestring);
 					r->content = strdup(cstr);
 				} else {
@@ -507,23 +491,20 @@ static void parse_non_streaming(struct llm_response *r, const char *body)
 			}
 		}
 
-		/* tool_calls */
-		struct cJSON *tc_arr = cJSON_GetObjectItemCaseSensitive(
-			message, "tool_calls");
-		if (tc_arr && cJSON_IsArray(tc_arr)) {
+		struct cJSON *tc_arr = json_get_obj(message, "tool_calls");
+		if (tc_arr && json_is_array(tc_arr)) {
 			parse_tool_calls_array(tc_arr, &r->tool_calls);
 			normalise_finish_reason(r);
 		}
 	}
 
-	/* usage */
-	struct cJSON *usage = cJSON_GetObjectItemCaseSensitive(root, "usage");
+	struct cJSON *usage = json_get_obj(root, "usage");
 	if (usage) {
 		r->prompt_tokens = json_get_int(usage, "prompt_tokens", 0);
 		r->completion_tokens = json_get_int(usage, "completion_tokens", 0);
 	}
 
-	cJSON_Delete(root);
+	json_delete(root);
 }
 
 /* -------------------------------------------------------------------------
@@ -640,46 +621,40 @@ static int process_sse_data_line(struct stream_state *ss, const char *data)
 		return 0;
 	}
 
-	struct cJSON *choices = cJSON_GetObjectItemCaseSensitive(chunk,
-								 "choices");
-	if (!choices || !cJSON_IsArray(choices) ||
-	    cJSON_GetArraySize(choices) == 0) {
-		cJSON_Delete(chunk);
+	struct cJSON *choices = json_get_obj(chunk, "choices");
+	if (!choices || !json_is_array(choices) ||
+	    json_get_array_size(choices) == 0) {
+		json_delete(chunk);
 		return 0;
 	}
 
-	struct cJSON *choice = cJSON_GetArrayItem(choices, 0);
+	struct cJSON *choice = json_get_array_item(choices, 0);
 	if (!choice) {
-		cJSON_Delete(chunk);
+		json_delete(chunk);
 		return 0;
 	}
 
-	/* finish_reason */
 	const char *fr = json_get_str(choice, "finish_reason");
 	if (fr && fr[0] && strcmp(fr, "null") != 0)
 		snprintf(ss->finish_reason, sizeof(ss->finish_reason), "%s", fr);
 
-	struct cJSON *delta = cJSON_GetObjectItemCaseSensitive(choice, "delta");
+	struct cJSON *delta = json_get_obj(choice, "delta");
 	if (!delta) {
-		cJSON_Delete(chunk);
+		json_delete(chunk);
 		return 0;
 	}
 
-	/* Content delta */
-	struct cJSON *content_item = cJSON_GetObjectItemCaseSensitive(
-		delta, "content");
-	if (content_item && !cJSON_IsNull(content_item)) {
-		const char *cstr = cJSON_GetStringValue(content_item);
+	struct cJSON *content_item = json_get_obj(delta, "content");
+	if (content_item && !json_is_null(content_item)) {
+		const char *cstr = json_str_value(content_item);
 		if (cstr)
 			stream_content_append(ss, cstr);
 	}
 
-	/* Tool call deltas */
-	struct cJSON *tc_arr = cJSON_GetObjectItemCaseSensitive(delta,
-								"tool_calls");
-	if (tc_arr && cJSON_IsArray(tc_arr)) {
+	struct cJSON *tc_arr = json_get_obj(delta, "tool_calls");
+	if (tc_arr && json_is_array(tc_arr)) {
 		struct cJSON *tc_item = NULL;
-		cJSON_ArrayForEach(tc_item, tc_arr)
+		json_array_foreach(tc_item, tc_arr)
 		{
 			int index = json_get_int(tc_item, "index", 0);
 			struct stream_tool_slot *slot =
@@ -691,8 +666,7 @@ static int process_sse_data_line(struct stream_state *ss, const char *data)
 			if (id && id[0] && !slot->id[0])
 				snprintf(slot->id, sizeof(slot->id), "%s", id);
 
-			struct cJSON *fn = cJSON_GetObjectItemCaseSensitive(
-				tc_item, "function");
+			struct cJSON *fn = json_get_obj(tc_item, "function");
 			if (fn) {
 				const char *fname = json_get_str(fn, "name");
 				if (fname && fname[0] && !slot->name[0])
@@ -705,14 +679,13 @@ static int process_sse_data_line(struct stream_state *ss, const char *data)
 		}
 	}
 
-	/* Optional: usage in the final chunk */
-	struct cJSON *usage = cJSON_GetObjectItemCaseSensitive(chunk, "usage");
+	struct cJSON *usage = json_get_obj(chunk, "usage");
 	if (usage) {
 		ss->prompt_tokens = json_get_int(usage, "prompt_tokens", 0);
 		ss->completion_tokens = json_get_int(usage, "completion_tokens", 0);
 	}
 
-	cJSON_Delete(chunk);
+	json_delete(chunk);
 	return 0;
 }
 
@@ -837,8 +810,7 @@ struct llm_response *llm_complete(const struct conversation_history *conv,
 		if (http_resp.body && http_resp.body_length > 0) {
 			struct cJSON *err = json_parse(http_resp.body);
 			if (err) {
-				struct cJSON *eo = cJSON_GetObjectItemCaseSensitive(
-					err, "error");
+				struct cJSON *eo = json_get_obj(err, "error");
 				if (eo) {
 					const char *em = json_get_str(eo,
 								      "message");
@@ -846,7 +818,7 @@ struct llm_response *llm_complete(const struct conversation_history *conv,
 						snprintf(detail, sizeof(detail),
 							 ": %s", em);
 				}
-				cJSON_Delete(err);
+				json_delete(err);
 			}
 		}
 		struct llm_response *r = error_response("HTTP %ld%s",
