@@ -51,25 +51,25 @@ static int parse_read_args(const char *json, struct read_args *args)
 
 	const char *path = json_get_str(root, "path");
 	if (!path) {
-		cJSON_Delete(root);
+		json_delete(root);
 		return -1;
 	}
 
 	if (strlen(path) >= sizeof(args->path)) {
-		cJSON_Delete(root);
+		json_delete(root);
 		return -1;
 	}
 	snprintf(args->path, sizeof(args->path), "%s", path);
 
-	cJSON *offset_node = cJSON_GetObjectItemCaseSensitive(root, "offset");
-	if (offset_node && cJSON_IsNumber(offset_node)) {
+	cJSON *offset_node = json_get_obj(root, "offset");
+	if (offset_node && json_is_number(offset_node)) {
 		args->offset = (long)offset_node->valuedouble;
 		if (args->offset < 0)
 			args->offset = 0;
 	}
 
-	cJSON *length_node = cJSON_GetObjectItemCaseSensitive(root, "length");
-	if (length_node && cJSON_IsNumber(length_node)) {
+	cJSON *length_node = json_get_obj(root, "length");
+	if (length_node && json_is_number(length_node)) {
 		args->length = (long)length_node->valuedouble;
 		if (args->length <= 0)
 			args->length = READ_DEFAULT_LENGTH;
@@ -77,7 +77,7 @@ static int parse_read_args(const char *json, struct read_args *args)
 			args->length = READ_MAX_LENGTH;
 	}
 
-	cJSON_Delete(root);
+	json_delete(root);
 	return 0;
 }
 
