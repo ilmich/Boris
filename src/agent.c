@@ -19,7 +19,6 @@
 #include "metrics.h"
 #include "logger.h"
 #include "arena.h"
-#include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -89,37 +88,37 @@ static int extract_tool_call_json(const char *json, size_t json_len,
 	if (!name)
 		name = json_get_str(root, "tool");
 	if (!name) {
-		cJSON_Delete(root);
+		json_delete(root);
 		return 0;
 	}
 
-	cJSON *args = cJSON_GetObjectItemCaseSensitive(root, "arguments");
+	cJSON *args = json_get_obj(root, "arguments");
 	char *args_str = NULL;
-	if (args && (cJSON_IsObject(args) || cJSON_IsArray(args))) {
+	if (args && (json_is_object(args) || json_is_array(args))) {
 		args_str = json_to_str(args);
 	} else {
-		cJSON *args_obj = cJSON_CreateObject();
+		cJSON *args_obj = json_create_object();
 		if (args_obj) {
 			cJSON *item = NULL;
-			cJSON_ArrayForEach(item, root)
+			json_array_foreach(item, root)
 			{
 				if (item->string &&
 				    strcmp(item->string, "tool") != 0 &&
 				    strcmp(item->string, "name") != 0 &&
 				    strcmp(item->string, "arguments") != 0) {
-					cJSON_AddItemToObject(args_obj,
-							      item->string,
-							      cJSON_Duplicate(item, true));
+					json_add_item(args_obj,
+						      item->string,
+						      json_duplicate(item, 1));
 				}
 			}
 			args_str = json_to_str(args_obj);
-			cJSON_Delete(args_obj);
+			json_delete(args_obj);
 		}
 	}
 
 	if (*count >= TOOL_CALL_LIST_MAX) {
 		free(args_str);
-		cJSON_Delete(root);
+		json_delete(root);
 		return 0;
 	}
 
@@ -132,7 +131,7 @@ static int extract_tool_call_json(const char *json, size_t json_len,
 	free(args_str);
 	(*count)++;
 
-	cJSON_Delete(root);
+	json_delete(root);
 	return 1;
 }
 
