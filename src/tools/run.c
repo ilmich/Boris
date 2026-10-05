@@ -156,19 +156,19 @@ static int parse_run_args(const char *json_str, struct run_args *out)
 
 	const char *path = json_get_str(root, "path");
 	if (!path || strlen(path) >= sizeof(out->path)) {
-		cJSON_Delete(root);
+		json_delete(root);
 		return -1;
 	}
 	snprintf(out->path, sizeof(out->path), "%s", path);
 
-	cJSON *args_node = cJSON_GetObjectItemCaseSensitive(root, "args");
-	if (args_node && cJSON_IsArray(args_node)) {
-		int n = cJSON_GetArraySize(args_node);
+	cJSON *args_node = json_get_obj(root, "args");
+	if (args_node && json_is_array(args_node)) {
+		int n = json_get_array_size(args_node);
 		if (n > USER_ARGS_MAX)
 			n = USER_ARGS_MAX;
 		for (int i = 0; i < n; i++) {
-			cJSON *item = cJSON_GetArrayItem(args_node, i);
-			if (!item || !cJSON_IsString(item))
+			cJSON *item = json_get_array_item(args_node, i);
+			if (!item || !json_is_string(item))
 				continue;
 			snprintf(out->user_args[out->user_argc],
 				 USER_ARG_LEN, "%s", item->valuestring);
@@ -176,9 +176,8 @@ static int parse_run_args(const char *json_str, struct run_args *out)
 		}
 	}
 
-	cJSON *timeout_node = cJSON_GetObjectItemCaseSensitive(root,
-							       "timeout_seconds");
-	if (timeout_node && cJSON_IsNumber(timeout_node)) {
+	cJSON *timeout_node = json_get_obj(root, "timeout_seconds");
+	if (timeout_node && json_is_number(timeout_node)) {
 		int t = (int)timeout_node->valuedouble;
 		if (t < 1)
 			t = 1;
@@ -200,7 +199,7 @@ static int parse_run_args(const char *json_str, struct run_args *out)
 		}
 	}
 
-	cJSON_Delete(root);
+	json_delete(root);
 	return 0;
 }
 
