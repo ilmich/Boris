@@ -704,6 +704,62 @@ static void test_text_tool_fallback(void)
 }
 
 /*
+ * Test: Text tool fallback parses <tools> tags in stop responses
+ * ---------------------------------------------------------------------- */
+static void test_text_tool_fallback_tools_tag(void)
+{
+	printf("  Test: Text tool fallback parses <tools> tags\n");
+
+	mock_http_reset();
+	mock_http_enable();
+
+	cJSON *root = cJSON_CreateObject();
+	cJSON *choices = cJSON_CreateArray();
+	cJSON *choice = cJSON_CreateObject();
+	cJSON *message = cJSON_CreateObject();
+	cJSON_AddStringToObject(message, "role", "assistant");
+	cJSON_AddStringToObject(message, "content",
+				"<tools>\n"
+				"    {\"name\":\"memory\","
+				"\"arguments\":{\"action\":\"list\"}}\n"
+				"</tools>");
+	cJSON_AddItemToObject(choice, "message", message);
+	cJSON_AddStringToObject(choice, "finish_reason", "stop");
+	cJSON_AddItemToArray(choices, choice);
+	cJSON_AddItemToObject(root, "choices", choices);
+	cJSON *usage = cJSON_CreateObject();
+	cJSON_AddNumberToObject(usage, "prompt_tokens", 10);
+	cJSON_AddNumberToObject(usage, "completion_tokens", 5);
+	cJSON_AddItemToObject(root, "usage", usage);
+	char *resp1 = cJSON_PrintUnformatted(root);
+	cJSON_Delete(root);
+	mock_http_queue_response(resp1, 200);
+	free(resp1);
+
+	char *resp2 = make_stop_response("Memory list complete.");
+	mock_http_queue_response(resp2, 200);
+	free(resp2);
+
+	struct agent_configuration cfg = make_test_config();
+	cfg.text_tool_fallback = true;
+	cfg.tools_enabled = TOOL_MEMORY;
+	tools_register_builtins();
+
+	struct agent_result result = agent_run("What's in memory?", &cfg);
+
+	ASSERT(result.finish_reason == FINISHED_NATURALLY,
+	       "should finish naturally after <tools> tag fallback");
+	ASSERT(result.turns_used == 2,
+	       "should use 2 turns (tool call + final answer)");
+	ASSERT(mock_http_call_count() == 2,
+	       "should make exactly 2 HTTP calls");
+
+	agent_result_free(&result);
+	configuration_destroy(&cfg);
+	mock_http_disable();
+}
+
+/*
  * Test 16: Text tool fallback parses markdown code-fenced JSON
  * ---------------------------------------------------------------------- */
 static void test_text_tool_fallback_markdown(void)
@@ -936,6 +992,7 @@ int main(void)
 	test_session_path();
 	test_transport_error();
 	test_text_tool_fallback();
+	test_text_tool_fallback_tools_tag();
 	test_text_tool_fallback_markdown();
 	test_length_short_conversation();
 	test_stream_malformed_json();

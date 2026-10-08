@@ -147,15 +147,17 @@ static int parse_text_tool_calls(const char *text,
 	int count = 0;
 	int serial = 0;
 	const char *p = text;
-	const char *tag_open = "<tool_call>";
-	const char *tag_close = "</tool_call>";
+	const char *tool_call_open = "<tool_call>";
+	const char *tool_call_close = "</tool_call>";
+	const char *tools_open = "<tools>";
+	const char *tools_close = "</tools>";
 
 	/* Pass 1: XML-style <tool_call`>...</tool_call`> tags */
-	while ((p = strstr(p, tag_open)) != NULL) {
-		p += strlen(tag_open);
+	while ((p = strstr(p, tool_call_open)) != NULL) {
+		p += strlen(tool_call_open);
 		while (*p == '\n' || *p == '\r' || *p == ' ' || *p == '\t')
 			p++;
-		const char *close = strstr(p, tag_close);
+		const char *close = strstr(p, tool_call_close);
 		if (!close)
 			break;
 		size_t json_len = (size_t)(close - p);
@@ -164,10 +166,28 @@ static int parse_text_tool_calls(const char *text,
 					       out_list, &count, &serial,
 					       scratch);
 		}
-		p = close + strlen(tag_close);
+		p = close + strlen(tool_call_close);
+	}
+	
+	/* Pass 2: XML-style <tools`>...</tools`> tags */
+	p = text;
+	while ((p = strstr(p, tools_open)) != NULL) {
+		p += strlen(tools_open);
+		while (*p == '\n' || *p == '\r' || *p == ' ' || *p == '\t')
+			p++;
+		const char *close = strstr(p, tools_close);
+		if (!close)
+			break;
+		size_t json_len = (size_t)(close - p);
+		if (json_len > 0) {
+			extract_tool_call_json(p, json_len,
+					       out_list, &count, &serial,
+					       scratch);
+		}
+		p = close + strlen(tools_close);
 	}
 
-	/* Pass 2: markdown code-fenced JSON blocks
+	/* Pass 3: markdown code-fenced JSON blocks
 	 *
 	 * Many local models that lack native tool_calls support emit
 	 * tool invocations as JSON inside markdown code fences, e.g.:
