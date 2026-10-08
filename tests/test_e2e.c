@@ -703,6 +703,132 @@ static void test_text_tool_fallback(void)
 	mock_http_disable();
 }
 
+/* Helper: case-sensitive substring search across every message in a conversation. */
+static bool conversation_search(const struct conversation_history *conv, const char *needle);
+
+static bool conversation_search(const struct conversation_history *conv,
+				const char *needle)
+{
+	if (!conv || !needle)
+		return false;
+	for (size_t i = 0; i < conv->count; i++) {
+		if (!conv->messages[i].content)
+			continue;
+		if (strstr(conv->messages[i].content, needle) != NULL)
+			return true;
+	}
+	return false;
+}
+/*
+ * Test: suppress_native_tool_injection gates the text-fallback reminder.
+ * ----------------------------------------------------------------------
+ *
+ * When text_tool_fallback is on and the model emits tool calls as text, the
+ * harness normally injects a <system-reminder> nudging the model toward the
+ * native tool_calls channel. This test verifies that setting
+ * suppress_native_tool_injection = true prevents that injection, while the
+ * default (false) allows it.
+ */
+static void test_suppress_native_tool_injection(void)
+{
+	printf("  Test: suppress_native_tool_injection\n");
+
+	mock_http_reset();
+	mock_http_enable();
+
+	/* First response: a stop whose content embeds a tool call in XML tags. */
+	cJSON *root = cJSON_CreateObject();
+	cJSON *choices = cJSON_CreateArray();
+	cJSON *choice = cJSON_CreateObject();
+	cJSON *message = cJSON_CreateObject();
+	cJSON_AddStringToObject(message, "role", "assistant");
+	cJSON_AddStringToObject(message, "content",
+				"<tool_call>\n{\"name\":\"memory\",\"arguments\":{\"action\":\"list\"}}\n</tool_call>");
+	cJSON_AddItemToObject(choice, "message", message);
+	cJSON_AddStringToObject(choice, "finish_reason", "stop");
+	cJSON_AddItemToArray(choices, choice);
+	cJSON_AddItemToObject(root, "choices", choices);
+	char *resp1 = cJSON_PrintUnformatted(root);
+	cJSON_Delete(root);
+	mock_http_queue_response(resp1, 200);
+	free(resp1);
+
+	/* Second response: final stop after the tool result is fed back. */
+	char *resp2 = make_stop_response("Memory list complete.");
+	mock_http_queue_response(resp2, 200);
+	free(resp2);
+
+	/* Fragments that appear only inside the injected reminder. */
+	const char *reminder = "emitted tool calls as text";
+
+	struct agent_configuration cfg = make_test_config();
+	cfg.text_tool_fallback = true;
+	cfg.tools_enabled = TOOL_MEMORY;
+	tools_register_builtins();
+
+	/* Scenario 1: default config => suppress_native_tool_injection == false. */
+	struct conversation_history *conv = conversation_create();
+	conversation_add_user(conv, "What's in memory?");
+	ASSERT(conversation_count_role(conv, MESSAGE_ROLE_USER) == 1,
+	       "user message must be present");
+	
+	struct agent_result result = agent_run_conv(conv, &cfg);
+
+	ASSERT(result.finish_reason == FINISHED_NATURALLY,
+	       "should finish naturally after text tool fallback");
+	ASSERT(conv->count > 0, "conversation must not be empty");
+
+	bool found = conversation_search(conv, reminder);
+	ASSERT(found, "reminder should be injected when not suppressed");
+
+	agent_result_free(&result);
+	conversation_destroy(conv);
+	configuration_destroy(&cfg);
+	mock_http_disable();
+
+	/* Scenario 2: suppression enabled => the reminder must not appear. */
+	mock_http_reset();
+	mock_http_enable();
+
+	root = cJSON_CreateObject();
+	choices = cJSON_CreateArray();
+	choice = cJSON_CreateObject();
+	message = cJSON_CreateObject();
+	cJSON_AddStringToObject(message, "role", "assistant");
+	cJSON_AddStringToObject(message, "content",
+				"<tool_call>\n{\"name\":\"memory\",\"arguments\":{\"action\":\"list\"}}\n</tool_call>");
+	cJSON_AddItemToObject(choice, "message", message);
+	cJSON_AddStringToObject(choice, "finish_reason", "stop");
+	cJSON_AddItemToArray(choices, choice);
+	cJSON_AddItemToObject(root, "choices", choices);
+	resp1 = cJSON_PrintUnformatted(root);
+	cJSON_Delete(root);
+	mock_http_queue_response(resp1, 200);
+	free(resp1);
+
+	resp2 = make_stop_response("Memory list complete.");
+	mock_http_queue_response(resp2, 200);
+	free(resp2);
+
+	conv = conversation_create();
+	conversation_add_system(conv, "You are helpful.");
+	conversation_add_user(conv, "What's in memory?");
+
+	cfg = make_test_config();
+	cfg.text_tool_fallback = true;
+	cfg.tools_enabled = TOOL_MEMORY;
+	cfg.suppress_native_tool_injection = true;
+	result = agent_run_conv(conv, &cfg);
+
+	found = conversation_search(conv, reminder);
+	ASSERT(!found, "reminder must NOT be injected when suppressed");
+
+	agent_result_free(&result);
+	conversation_destroy(conv);
+	configuration_destroy(&cfg);
+	mock_http_disable();
+}
+
 /*
  * Test 16: Text tool fallback parses markdown code-fenced JSON
  * ---------------------------------------------------------------------- */
@@ -937,6 +1063,7 @@ int main(void)
 	test_transport_error();
 	test_text_tool_fallback();
 	test_text_tool_fallback_markdown();
+	test_suppress_native_tool_injection();
 	test_length_short_conversation();
 	test_stream_malformed_json();
 	test_stream_no_done();

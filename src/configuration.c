@@ -173,6 +173,7 @@ void configuration_set_defaults(struct agent_configuration *config)
 	config->max_iterations = 16;
 	config->text_tool_fallback = true; /* parse JSON tool calls embedded in plain text,
 					      for models without native tool_calls support */
+	config->suppress_native_tool_injection = false;
 	config->max_retries = 2;
 	config->retry_backoff_ms = 1000;
 
@@ -242,6 +243,8 @@ enum boris_error configuration_set_key(struct agent_configuration *config,
 		config->max_iterations = parse_int(value, config->max_iterations);
 	} else if (strcmp(key, "agent.text_tool_fallback") == 0) {
 		config->text_tool_fallback = parse_bool(value);
+	} else if (strcmp(key, "agent.suppress_native_tool_injection") == 0) {
+		config->suppress_native_tool_injection = parse_bool(value);
 	} else if (strcmp(key, "agent.max_retries") == 0) {
 		config->max_retries = parse_int(value, config->max_retries);
 	} else if (strcmp(key, "agent.retry_backoff_ms") == 0) {

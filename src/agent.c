@@ -491,13 +491,15 @@ static struct agent_result run_loop(struct conversation_history *conv,
 					resp = NULL;
 
 					if (iterations - last_textfallback_reminder_iter >= REMINDER_COOLDOWN_ITERS) {
-						inject_reminder(conv,
-								"You emitted tool calls as text rather than "
-								"using the native tool_calls channel. The "
-								"native channel is preferred \xe2\x80\x94 it "
-								"is more reliable and avoids parsing "
-								"ambiguity.");
-						last_textfallback_reminder_iter = iterations;
+						if (!cfg->suppress_native_tool_injection) {
+							inject_reminder(conv,
+									"You emitted tool calls as text rather than "
+									"using the native tool_calls channel. The "
+									"native channel is preferred \xe2\x80\x94 it "
+									"is more reliable and avoids parsing "
+									"ambiguity.");
+							last_textfallback_reminder_iter = iterations;
+						}
 					}
 
 					for (int ti = 0; ti < nc; ti++) {

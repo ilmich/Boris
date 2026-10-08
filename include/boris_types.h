@@ -59,6 +59,10 @@ struct agent_configuration {
 
 	int max_iterations;
 	bool text_tool_fallback; /* Parse XML tool calls embedded in plain-text responses */
+	/* When text_tool_fallback is on and the model can only emit tool calls as
+   * text, do NOT inject reminders that push it toward the native tool_calls
+   * channel. Such injection pollutes context and the model cannot comply. */
+	bool suppress_native_tool_injection;
 	int max_retries;
 	int retry_backoff_ms;
 
